@@ -18,17 +18,14 @@ using System;
 using SFML.Graphics;
 using System.ComponentModel;
 
-string RunningPath = AppDomain.CurrentDomain.BaseDirectory;
-string path = string.Format("{0}Resources\\", Path.GetFullPath(Path.Combine(RunningPath, @"..\..\..\")));
-
 main();
 
 void main()
 {
     // Where is the resource folder?
-    // USE_WORKING_DIR specifies whether to use the working directory
-    // ALT_RESOURCE_FOLDER specifies the location. "" uses the exe's location
-    //string path = @"C:/Users/natha/source/repos/Map-Generator-CSharp/Resources/";
+    string RunningPath = AppDomain.CurrentDomain.BaseDirectory;
+    string path = string.Format("{0}Resources\\", Path.GetFullPath(Path.Combine(RunningPath, @"..\..\..\")));
+    
     var initialScreenSize = new Vector2i(1366, 768);
 
     GenerationSettings gs = new GenerationSettings(
@@ -156,7 +153,7 @@ void main()
                 frameCounter = 0;
             }
             dm.display();
-            window.WaitAndDispatchEvents();
+            //window.WaitAndDispatchEvents();
         }
     } while (repeatProgram);
 }
