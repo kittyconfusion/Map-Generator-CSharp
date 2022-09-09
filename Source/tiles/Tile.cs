@@ -24,6 +24,7 @@ class Tile
     private Dictionary<string, double> attributes = new Dictionary<string, double>();
     private LinkedList<string> features = new LinkedList<string>();
     private Color colorCache;
+
     private bool needToRenderColor = true;
 
     private TileMap tileMap;
@@ -119,7 +120,7 @@ class Tile
                     colorCache.G = (byte)(int)(elev + 105);
                     colorCache.B = 95;
                 }
-                else if (hasFeature("forest"))
+                else if (hasFeature("forest") && elev <= 1.5)
                 { // Forest
                     colorCache.R = 50;
                     colorCache.G = (byte)(int)(175 - 100 * hum);

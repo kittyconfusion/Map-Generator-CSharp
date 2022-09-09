@@ -86,6 +86,7 @@ class TileMap
     }
     private Tile[] tileMap;
     private GenerationSettings settings;
+
     private int seed;
     public int getSeed() { return seed; }
     private static int randomInitialSeed()

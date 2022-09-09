@@ -33,7 +33,8 @@ class DisplayManager
     }
 
     private DisplaySettings displaySettings;
-    private double xOffset, yOffset, tileSize;
+    private double xOffset, yOffset;
+    private float tileSize;
 
     private RenderWindow window;
     private View view;
@@ -54,20 +55,41 @@ class DisplayManager
     private Vector2i viewTileCoords;
     private Vector2f viewTileDisplayCoords;
 
+    private double cameraSpeed, effectiveCameraSpeed;
+
     private TileMap tileMap;
 
     private string @resourceDir;
 
-    private RectangleShape rect = new RectangleShape();
+    Clock clock;
+
+    //Movement Stuffs
+    int recentDragX, recentDragY;
+
+    bool drag = false;
+
+    bool left = false, right = false, up = false, down = false, shift = false;
+
+    double clickTime;
+    int clickX, clickY;
+
+    double maxClickLength = 0.2; // How long a click can be to qualify (in seconds)
+
+    public double deltaTime;
+
+    private List<Vertex> rectPoints = new List<Vertex>(40000);
 
     public void renderMap(bool active) { activeMap = active; }
     public void renderMapUI(bool active) { activeMapUI = active; }
     public void renderMenu(bool active) { activeMenu = active; }
-
+        
     public bool renderingMap() { return activeMap; }
     public bool renderingMapUI() { return activeMapUI; }
     public bool renderingMenu() { return activeMenu; }
 
+    public void SetClock(Clock c) { clock = c; }
+    double getTileSize() { return tileSize; }
+    double getTilesShown() { return Math.Max(displaySettings.screenWidth, displaySettings.screenHeight) / tileSize; }
 
     public DisplayManager(DisplaySettings settings, TileMap tm, string rDir) 
     {
@@ -105,12 +127,22 @@ class DisplayManager
 
         xOffset = settings.initialXOffset;
         yOffset = settings.initialYOffset;
-        tileSize = Math.Max(settings.screenWidth, settings.screenHeight) / settings.initialTilesShown;
+        tileSize = (float)(Math.Max(settings.screenWidth, settings.screenHeight) / settings.initialTilesShown);
 
         loadFont();
         loadIcon();
 
+        // How many seconds does it take to move across one screen with the camera?
+        double cameraSecondsPerScreen = 2;
+        // Camera speed in tiles per second
+        cameraSpeed = displaySettings.initialTilesShown / cameraSecondsPerScreen;
+        effectiveCameraSpeed = cameraSpeed;
     }
+    public RenderWindow GetWindow()
+    {
+        return window;
+    }
+
     public void setTileMap(TileMap tm)
     {
         tileMap = tm;
@@ -143,11 +175,146 @@ class DisplayManager
         
         window.SetIcon(icon.Size.X, icon.Size.Y, icon.Pixels);
     }
-
-    public void resize(int width, int height)
+    //Called after all movement keys have been processed
+    public void Move()
     {
-        displaySettings.screenWidth = width;
-        displaySettings.screenHeight = height;
+        effectiveCameraSpeed = cameraSpeed;
+        effectiveCameraSpeed *= deltaTime; // Make speed ignore FPS
+        if(shift) { effectiveCameraSpeed *= 3; }
+
+        if (!drag)
+        {
+            if (up && !down) { moveCamera(0, (float)-effectiveCameraSpeed); }
+            else if (down && !up) { moveCamera(0, (float)effectiveCameraSpeed); }
+            if (left && !right) { moveCamera((float)-effectiveCameraSpeed, 0); }
+            else if (right && !left) { moveCamera((float)effectiveCameraSpeed, 0); }
+        }
+    }
+    public void OnKeyRelease(object sender, KeyEventArgs e)
+    {
+        if (e.Code == Keyboard.Key.W || e.Code == Keyboard.Key.Up) { up = false; }
+
+        if (e.Code == Keyboard.Key.S || e.Code == Keyboard.Key.Down) { down = false; }
+
+        if (e.Code == Keyboard.Key.A || e.Code == Keyboard.Key.Left) { left = false; }
+
+        if (e.Code == Keyboard.Key.D || e.Code == Keyboard.Key.Right) { right = false; }
+
+        if (e.Code == Keyboard.Key.LShift || e.Code == Keyboard.Key.RShift) { shift = false; }
+    }
+    public void OnKeyPress(object sender, KeyEventArgs e)
+    {
+
+        // Move via WASD. Mouse take priority over WASD.
+        if (e.Code == Keyboard.Key.W || e.Code == Keyboard.Key.Up) { up = true; }
+
+        else if (e.Code == Keyboard.Key.S || e.Code == Keyboard.Key.Down) { down = true; }
+        
+        else if (e.Code == Keyboard.Key.A || e.Code == Keyboard.Key.Left) { left = true; }
+
+        else if (e.Code == Keyboard.Key.D || e.Code == Keyboard.Key.Right) { right = true; }
+
+        else if (e.Code == Keyboard.Key.LShift || e.Code == Keyboard.Key.RShift) { shift = true; }
+
+        // changes color mode
+        else if (e.Code == Keyboard.Key.C)
+        {
+            setDisplayMode((getDisplayMode() + 3) % 4);
+            tileMap.rerenderTiles(getDisplayMode());
+        }
+        else if (e.Code == Keyboard.Key.V)
+        {
+            setDisplayMode((getDisplayMode() + 1) % 4);
+            tileMap.rerenderTiles(getDisplayMode());
+        }
+
+        // exits tile view
+        else if (e.Code == Keyboard.Key.Escape)
+        {
+            setWhetherViewingTile(false);
+        }
+
+        else if (e.Code == Keyboard.Key.F1)
+        {
+            renderMapUI(!renderingMapUI());
+        }
+        else if (e.Code == Keyboard.Key.Space)
+        {
+            Console.WriteLine("\n");
+            Random rand = new Random();
+            tileMap = new TileMap(tileMap.getSettings());
+        }
+
+        else if (e.Code == Keyboard.Key.F3)
+        {
+            NewMapFromConsole();
+        }
+    }
+    private void NewMapFromConsole()
+    {
+        int attemptSeed;
+        Console.WriteLine("Enter new seed: ");
+        try
+        {
+            attemptSeed = int.Parse(Console.ReadLine());
+            tileMap = new TileMap(tileMap.getSettings(), attemptSeed);
+        }
+        catch (Exception err)
+        {
+            Console.WriteLine("Invalid seed, " + err.Message);
+        }
+    }
+
+    public void OnMouseMove(object sender, MouseMoveEventArgs e)
+    {
+        if (drag)
+        {
+            int newX = e.X;
+            int newY = e.Y;
+
+            moveCamera((float)((recentDragX - newX) / getTileSize()), (float)((recentDragY - newY) / getTileSize()));
+
+            recentDragX = newX;
+            recentDragY = newY;
+        }
+    }
+    public void OnMousePress(object sender, MouseButtonEventArgs e)
+    {
+        if (e.Button == Mouse.Button.Left)
+        {
+            recentDragX = e.X;
+            recentDragY = e.Y;
+            drag = true;
+
+            clickX = e.X;
+            clickY = e.Y;
+            clickTime = clock.ElapsedTime.AsSeconds();
+        }
+    }
+    public void OnMouseRelease(object sender, MouseButtonEventArgs e)
+    {
+        if (e.Button == Mouse.Button.Left)
+        {
+            drag = false;
+
+            if (e.X - clickX == 0 && e.Y - clickY == 0 && clock.ElapsedTime.AsSeconds() - clickTime <= maxClickLength)
+            {
+                onClick((int)(clickX * ((double)(displaySettings.screenWidth) / getWindowWidth())), (int)(clickY * ((double)(displaySettings.screenHeight) / getWindowHeight())));
+            }
+        }
+    }
+    public void OnMouseScroll(object sender, MouseWheelScrollEventArgs e)
+    {
+        changeTileSize(e.Delta);
+
+        double cameraSecondsPerScreen = 2;
+
+        cameraSpeed = getTilesShown() / cameraSecondsPerScreen; // Tiles per second
+    }
+    public void resize(object sender, SizeEventArgs e)
+    {
+        displaySettings.screenWidth = (int)e.Width;
+        displaySettings.screenHeight = (int)e.Height;
         changeTileSize(0); // Make sure tilesize is within bounds
 
         view.Center = (new Vector2f(displaySettings.screenWidth / 2, displaySettings.screenHeight / 2));
@@ -207,6 +374,7 @@ class DisplayManager
         int tileDisplayWidth = (int)(displaySettings.screenWidth / tileSize) + 2;
         int tileDisplayHeight = (int)(displaySettings.screenHeight / tileSize) + 2;
 
+        rectPoints.Clear();
 
         for (int y = (int)yOffset; y < tileDisplayHeight + (int)yOffset; y++)
         {
@@ -219,30 +387,55 @@ class DisplayManager
                 }
 
                 Tile t = tileMap.getTile(x, y);
-                Vector2f screenPos = new Vector2f((float)((x-xOffset)*tileSize), (float)((y - yOffset) * tileSize));
+                Vector2f screenPos = new Vector2f((float)((x - xOffset) * tileSize), (float)((y - yOffset) * tileSize));
+                Color col;
+                
+                if (viewingTile == true && viewTileCoords.X == x && viewTileCoords.Y == y && activeMapUI)
+                {
+                    col = new Color(255, 100, 100);
+                }
+                else
+                {
+                    col = t.getColor(getDisplayMode());
+                }
+                
+                Vertex v = new Vertex(screenPos + new Vector2f(0, 0), col);
+                rectPoints.Add(v);
 
-        if (viewingTile == true && viewTileCoords.X == x && viewTileCoords.Y == y && activeMapUI)
-        {
-            drawTile(new Color(255, 100, 100), screenPos);
-        }
-        else
-            drawTile(t, screenPos);
+                v = new Vertex(screenPos + new Vector2f(tileSize, 0), col);
+                rectPoints.Add(v);
 
+                v = new Vertex(screenPos + new Vector2f(tileSize, tileSize), col);
+                rectPoints.Add(v);
+
+                v = new Vertex(screenPos + new Vector2f(0, tileSize), col);
+                rectPoints.Add(v);
+            }
+            if (rectPoints.Count >= 40000)
+            {
+                mapRenderTexture.Draw(rectPoints.ToArray(), PrimitiveType.Quads);
+                rectPoints.Clear();
+                //rectPoints = new List<Vertex>(10000);
             }
         }
+        //mapRenderTexture.Draw()
+        mapRenderTexture.Draw(rectPoints.ToArray(),PrimitiveType.Quads);
     }
-    private void drawTile(Tile t, Vector2f screenPos)
+    /*
+    private RectangleShape drawTile(Tile t, Vector2f screenPos)
     {
-        drawTile(t.getColor(getDisplayMode()), screenPos);
+        return drawTile(t.getColor(getDisplayMode()), screenPos);
     }
-    private void drawTile(Color highlight, Vector2f screenPos)
+    private RectangleShape drawTile(Color highlight, Vector2f screenPos)
     {
+        RectangleShape rect = new RectangleShape();
         rect.Position = screenPos;
         rect.Size = new Vector2f((float)tileSize, (float)tileSize);
         rect.FillColor = highlight;
-        mapRenderTexture.Draw(rect);
+        return rect;
+        //mapRenderTexture.Draw(rect);
     }
-
+    */
     private void drawTileStats()
     {
         Tile viewTile = tileMap.getTile(viewTileCoords.X, viewTileCoords.Y);
@@ -346,7 +539,7 @@ class DisplayManager
         controlText.Font = font;
         if (Keyboard.IsKeyPressed(Keyboard.Key.H))
         {
-            controlText.DisplayedString = ("WASD/arrows/click-and-drag to move. Shift to go faster.\nSpace to regenerate terrain. LeftCtrl + Space to enter seed in console.\nC/V to change display mode.\nClick on tile to view, ESC to stop viewing.\nF1 to toggle UI.\nLeftCtrl + E to save STL to file (put filepath in console).");
+            controlText.DisplayedString = ("WASD/arrows/click-and-drag to move. Shift to go faster.\nSpace to regenerate terrain. F3 to enter seed in console.\nC/V to change display mode.\nClick on tile to view, ESC to stop viewing.\nF1 to toggle UI.");
         }
         else
         {
@@ -484,7 +677,7 @@ class DisplayManager
     {
         Vector2f center = getCameraCenter();
 
-        tileSize = Math.Max(Math.Min(tileSize + delta, getMaxTileSize()), getMinTileSize());
+        tileSize = (float)Math.Max(Math.Min(tileSize + delta, getMaxTileSize()), getMinTileSize());
 
         xOffset = center.X - displaySettings.screenWidth / (2 * tileSize);
         yOffset = center.Y - displaySettings.screenHeight / (2 * tileSize);
